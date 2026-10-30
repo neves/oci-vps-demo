@@ -1,0 +1,4 @@
+# local-only notes / scratch, never the runbooks
+*.log
+*.tmp
+.DS_Store
