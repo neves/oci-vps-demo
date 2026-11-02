@@ -1,0 +1,2 @@
+runtime: nodejs26
+service_account: hello-speech-runtime@neves64.iam.gserviceaccount.com
