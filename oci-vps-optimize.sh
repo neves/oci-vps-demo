@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Idempotent low-memory setup for Ubuntu OCI 1 GiB VPSes.
+# Example: cat oci-vps-optimize.sh | ssh ubuntu@150.136.110.75 'sudo bash -s'
 # Tailscale is intentionally not modified or restarted.
 set -Eeuo pipefail
 
