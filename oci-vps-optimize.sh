@@ -11,7 +11,7 @@ if [[ $EUID -ne 0 ]]; then echo 'Run as root.' >&2; exit 1; fi
 # Install CLI utilities. mise is bootstrapped with its upstream installer because it
 # is not available from the Ubuntu apt sources on these hosts.
 DEBIAN_FRONTEND=noninteractive apt-get update -qq
-DEBIAN_FRONTEND=noninteractive apt-get install -y btop htop wget curl vim git unzip sqlite3 iotop iftop nethogs ncdu locales libatomic1
+DEBIAN_FRONTEND=noninteractive apt-get install -y btop htop wget curl vim git unzip sqlite3 iotop iftop nethogs ncdu locales libatomic1 default-mysql-client ffmpeg libwebp7 webp chafa
 # SSH forwards LC_ALL=en_US.UTF-8; generate it to avoid the remote shell warning.
 sed -i 's/^# *en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
 locale-gen en_US.UTF-8
