@@ -26,7 +26,7 @@ runuser -u ubuntu -- env HOME=/home/ubuntu bash -euo pipefail -c '
   grep -Fqx "$activation" "$HOME/.bashrc" || printf "%s\\n" "$activation" >> "$HOME/.bashrc"
   mise --version
   mise use --global uv@latest
-  mise use --global bun node python fzf pypi:httpie gcloud gh oci fd dust ripgrep bat eza npm:cf@1.0.0-beta.26 pi
+  mise use --global bun node python fzf pypi:httpie gcloud gh oci fd dust ripgrep bat eza npm:cf@1.0.0-beta.26 pi fx
 '
 
 snapshot() {
