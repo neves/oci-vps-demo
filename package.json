@@ -1,0 +1,15 @@
+{
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/bun": "latest"
+  },
+  "name": "oci-vps-demo",
+  "private": true,
+  "scripts": {
+    "typecheck": "bun check"
+  },
+  "peerDependencies": {
+    "typescript": "^7"
+  }
+}

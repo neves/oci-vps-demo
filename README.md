@@ -10,6 +10,7 @@ of the same shape.
 | :--- | :--- | :--- |
 | [`oci-vps.md`](oci-vps.md) | Oracle Cloud 1 GB · **Ubuntu** | The original reference guide: ~408 MB → ~205 MB used, 22 → 11 services, +2.5 GB tiered swap. |
 | [`gcloud-vps.md`](gcloud-vps.md) | Google Cloud `e2-micro` 1 GB · **Debian 13** | The applied port — 13 numbered changes, each with measured deltas. The one to run on a GCP box. |
+| [`hermes-remote-backend.md`](hermes-remote-backend.md) | OCI `hermes` · **Ubuntu** | Tailscale-only Hermes Desktop backend, auth, systemd service, gateway setup, and memory/security notes. |
 
 ## Results on the GCP instance (`us-east1-2vcpu-1gb-30gb`, `e2-micro`)
 
