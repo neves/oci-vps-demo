@@ -16,12 +16,10 @@ type User = {
 type AccountRow = {
   profile: string;
   region: string;
-  tenancy: string;
   tenancyName: string;
   homeRegion: string;
   user: string;
   email: string;
-  description: string;
   mfa: string;
   lifecycle: string;
   lastLogin: string;
@@ -77,12 +75,10 @@ async function accountRows(profile: Profile): Promise<AccountRow[]> {
     rows.push({
       profile: profile.name,
       region: profile.region,
-      tenancy: tenancy.data?.id ?? "",
       tenancyName,
       homeRegion,
       user: user.name ?? "",
       email: user.email ?? "",
-      description: user.description ?? "",
       mfa: user["is-mfa-activated"] ? "yes" : "no",
       lifecycle: user["lifecycle-state"] ?? "",
       lastLogin: user["last-successful-login-time"] ?? "",
@@ -102,9 +98,9 @@ const requested = [
 ].filter(Boolean);
 
 function renderAccountTable(rows: AccountRow[]): string {
-  const headers = ["Profile", "Region", "Tenancy", "Tenancy name", "Home region", "User", "Email", "Description", "MFA", "Lifecycle", "Last login", "Created"];
+  const headers = ["Profile", "Region", "Tenancy name", "Home region", "User", "Email", "MFA", "Lifecycle", "Last login", "Created"];
   const values = rows.map(r => [
-    r.profile, r.region, r.tenancy, r.tenancyName, r.homeRegion, r.user, r.email, r.description, r.mfa, r.lifecycle, r.lastLogin, r.created,
+    r.profile, r.region, r.tenancyName, r.homeRegion, r.user, r.email, r.mfa, r.lifecycle, r.lastLogin, r.created,
   ]);
   return renderTable(headers, values);
 }
@@ -126,7 +122,7 @@ try {
   }));
 
   for (const { profile, rows } of results) {
-    console.log(`\n=== Profile: ${profile.name} | region: ${profile.region} | tenancy: ${profile.tenancy} ===`);
+    console.log(`\n=== Profile: ${profile.name} | region: ${profile.region} ===`);
     console.log(rows.length ? renderAccountTable(rows) : "No users found in tenancy.");
   }
 } catch (error) {

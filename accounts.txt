@@ -1,0 +1,33 @@
+
+=== Profile: neves | region: sa-saopaulo-1 ===
+Profile  Region         Tenancy name  Home region  User                Email               MFA  Lifecycle  Last login                        Created                         
+-------  -------------  ------------  -----------  ------------------  ------------------  ---  ---------  --------------------------------  --------------------------------
+neves    sa-saopaulo-1  neves         GRU          neves64@icloud.com  neves64@icloud.com  yes  ACTIVE     2026-11-09T04:16:06.864000+00:00  2024-05-15T16:53:01.297000+00:00
+
+=== Profile: mneves | region: sa-vinhedo-1 ===
+Profile  Region        Tenancy name  Home region  User                 Email                MFA  Lifecycle  Last login                        Created                         
+-------  ------------  ------------  -----------  -------------------  -------------------  ---  ---------  --------------------------------  --------------------------------
+mneves   sa-vinhedo-1  mneves        VCP          oci.mneves@qi64.com  oci.mneves@qi64.com  yes  ACTIVE     2026-11-11T03:16:21.616000+00:00  2026-11-09T04:02:51.858000+00:00
+
+=== Profile: raise | region: us-ashburn-1 ===
+Profile  Region        Tenancy name   Home region  User                               Email                                MFA  Lifecycle  Last login                        Created                         
+-------  ------------  -------------  -----------  ---------------------------------  -----------------------------------  ---  ---------  --------------------------------  --------------------------------
+raise    us-ashburn-1  raisesistemas  IAD          thiago.bloomfield@e-inscricao.com  thiago.bloomfield@e-inscricao.com    yes  ACTIVE     2026-08-26T17:04:06.081000+00:00  2026-03-30T18:25:57.012000+00:00
+raise    us-ashburn-1  raisesistemas  IAD          marcos.neves@raisesistemas.com.br  oracle-cloud.raisesistemas@qi64.com  yes  ACTIVE     2026-11-10T20:58:34.082000+00:00  2022-05-20T18:59:41.068000+00:00
+
+=== Profile: ei | region: sa-saopaulo-1 ===
+Profile  Region         Tenancy name  Home region  User                                            Email            MFA  Lifecycle  Last login                        Created                         
+-------  -------------  ------------  -----------  ----------------------------------------------  ---------------  ---  ---------  --------------------------------  --------------------------------
+ei       sa-saopaulo-1  einscricao    GRU          oracleidentitycloudservice/dev@e-inscricao.com                   no   ACTIVE                                       2021-02-03T11:32:07.898000+00:00
+ei       sa-saopaulo-1  einscricao    GRU          dev@e-inscricao.com                             oci.ei@qi64.com  no   ACTIVE     2021-02-03T11:23:53.464000+00:00  2021-02-03T11:23:23.828000+00:00
+
+=== Profile: ei2 | region: us-ashburn-1 ===
+Profile  Region        Tenancy name  Home region  User                          Email            MFA  Lifecycle  Last login                        Created                         
+-------  ------------  ------------  -----------  ----------------------------  ---------------  ---  ---------  --------------------------------  --------------------------------
+ei2      us-ashburn-1  ei2           IAD          marcos.neves@e-inscricao.com  oracle@qi64.com  yes  ACTIVE     2026-11-03T14:12:58.704000+00:00  2025-08-22T07:19:26.857000+00:00
+
+=== Profile: atos6 | region: us-ashburn-1 ===
+Profile  Region        Tenancy name  Home region  User                                      Email               MFA  Lifecycle  Last login                        Created                         
+-------  ------------  ------------  -----------  ----------------------------------------  ------------------  ---  ---------  --------------------------------  --------------------------------
+atos6    us-ashburn-1  atos6         IAD          oracleidentitycloudservice/dev@atos6.com                      no   ACTIVE                                       2020-08-02T03:44:40.645000+00:00
+atos6    us-ashburn-1  atos6         IAD          dev@atos6.com                             oci.atos6@qi64.com  yes  ACTIVE     2021-01-29T10:03:52.373000+00:00  2020-08-02T03:39:38.494000+00:00

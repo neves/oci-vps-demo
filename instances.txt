@@ -1,0 +1,42 @@
+
+=== Profile: neves | region: sa-saopaulo-1 ===
+Type      Name         State    Shape                   CPU  Memory (GB)  IPv4 addresses            
+--------  -----------  -------  ----------------------  ---  -----------  --------------------------
+Instance  agent-t3-pi  RUNNING  VM.Standard.E2.1.Micro  1    1            10.0.0.217, 144.22.195.189
+Instance  proxy        RUNNING  VM.Standard.E2.1.Micro  1    1            10.0.0.54, 147.15.4.246   
+MySQL     mysql        ACTIVE   MySQL.Free              N/A  N/A          N/A                       
+
+=== Profile: mneves | region: sa-vinhedo-1 ===
+Type      Name    State    Shape                   CPU  Memory (GB)  IPv4 addresses            
+--------  ------  -------  ----------------------  ---  -----------  --------------------------
+Instance  hermes  RUNNING  VM.Standard.E2.1.Micro  1    1            10.0.0.210, 167.126.13.243
+MySQL     mysql   ACTIVE   MySQL.Free              N/A  N/A          N/A                       
+
+=== Profile: raise | region: us-ashburn-1 ===
+Type      Name                                    State    Shape                   CPU  Memory (GB)  IPv4 addresses            
+--------  --------------------------------------  -------  ----------------------  ---  -----------  --------------------------
+Instance  beszel                                  RUNNING  VM.Standard.E2.1.Micro  1    1            10.0.0.157, 150.136.110.75
+Instance  ubuntu-24.04-VM.Standard.E2.1.Micro-1G  RUNNING  VM.Standard.E2.1.Micro  1    1            10.0.0.32, 129.213.78.0   
+MySQL     MySql                                   ACTIVE   MySQL.Free              N/A  N/A          N/A                       
+
+=== Profile: ei | region: sa-saopaulo-1 ===
+Type      Name                      State    Shape                   CPU  Memory (GB)  IPv4 addresses           
+--------  ------------------------  -------  ----------------------  ---  -----------  -------------------------
+Instance  Lab-AMD-1GB-Ubuntu-24.04  RUNNING  VM.Standard.E2.1.Micro  1    1            10.0.0.112, 129.148.41.16
+Instance  bun-socket                RUNNING  VM.Standard.E2.1.Micro  1    1            10.0.0.163, 152.67.45.53 
+MySQL     mysql                     ACTIVE   MySQL.Free              N/A  N/A          N/A                      
+
+=== Profile: ei2 | region: us-ashburn-1 ===
+Type      Name      State     Shape                   CPU  Memory (GB)  IPv4 addresses           
+--------  --------  --------  ----------------------  ---  -----------  -------------------------
+Instance  whatsapp  RUNNING   VM.Standard.E2.1.Micro  1    1            10.0.0.48, 129.80.228.205
+MySQL     mysql     INACTIVE  MySQL.Free              N/A  N/A          N/A                      
+
+=== Profile: atos6 | region: us-ashburn-1 ===
+Type      Name              State    Shape                   CPU  Memory (GB)  IPv4 addresses             
+--------  ----------------  -------  ----------------------  ---  -----------  ---------------------------
+Instance  ampere-1vcpu-6gb  RUNNING  VM.Standard.A1.Flex     1    6            10.0.0.110, 132.145.206.180
+Instance  bun               RUNNING  VM.Standard.E2.1.Micro  1    1            10.0.0.26, 150.136.18.151  
+Instance  heroku-log-drain  RUNNING  VM.Standard.A1.Flex     2    12           10.0.0.152, 129.80.207.79  
+Instance  memory            STOPPED  VM.Standard.A1.Flex     1    2            10.0.0.227, 157.151.236.75 
+MySQL     mysql             ACTIVE   MySQL.Free              N/A  N/A          N/A                        

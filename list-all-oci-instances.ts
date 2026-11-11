@@ -13,7 +13,7 @@ type MysqlDbSystem = {
   "lifecycle-state": string;
   "shape-name": string;
 };
-type ReportRow = { type: string; name: string; state: string; shape: string; cpu: string; memory: string };
+type ReportRow = { type: string; name: string; state: string; shape: string; cpu: string; memory: string; ipv4: string };
 
 const configPath = process.env.OCI_CLI_CONFIG_FILE ?? `${Bun.env.HOME}/.oci/config`;
 
@@ -46,8 +46,8 @@ async function ociJson<T>(args: string[]): Promise<T> {
 }
 
 function table(profile: Profile, rows: ReportRow[]): string {
-  const headers = ["Type", "Name", "State", "Shape", "CPU", "Memory (GB)"];
-  const values = rows.map(r => [r.type, r.name, r.state, r.shape, r.cpu, r.memory]);
+  const headers = ["Type", "Name", "State", "Shape", "CPU", "Memory (GB)", "IPv4 addresses"];
+  const values = rows.map(r => [r.type, r.name, r.state, r.shape, r.cpu, r.memory, r.ipv4]);
   const widths = headers.map((h, n) => Math.max(h.length, ...values.map(r => r[n].length)));
   const format = (row: string[]) => row.map((value, n) => value.padEnd(widths[n])).join("  ");
   return [
@@ -75,14 +75,38 @@ async function report(profile: Profile): Promise<string> {
       "--compartment-id", id, "--all",
     ]))),
   ]);
-  const rows: ReportRow[] = computeResults.flatMap(result => result.data ?? []).map(instance => ({
-    type: "Instance",
-    name: instance["display-name"] ?? "",
-    state: instance["lifecycle-state"] ?? "",
-    shape: instance.shape ?? "",
-    cpu: String(instance["shape-config"]?.ocpus ?? "N/A"),
-    memory: String(instance["shape-config"]?.["memory-in-gbs"] ?? "N/A"),
+  const instances = computeResults.flatMap(result => result.data ?? []);
+  const instanceRows = await Promise.all(instances.map(async instance => {
+    let ipv4 = "N/A";
+    try {
+      const attachments = await ociJson<{ data?: { "vnic-id": string }[] }>([
+        "--profile", profile.name, "compute", "vnic-attachment", "list",
+        "--compartment-id", instance["compartment-id"] ?? profile.tenancy,
+        "--instance-id", instance.id,
+      ]);
+      const vnics = await Promise.all((attachments.data ?? []).map(({ "vnic-id": vnicId }) =>
+        ociJson<{ data?: { "private-ip"?: string; "public-ip"?: string | null } }>([
+          "--profile", profile.name, "network", "vnic", "get", "--vnic-id", vnicId,
+        ]),
+      ));
+      ipv4 = vnics.flatMap(vnic => {
+        const data = vnic.data;
+        return data ? [data["private-ip"], data["public-ip"]].filter((ip): ip is string => Boolean(ip)) : [];
+      }).join(", ") || "None";
+    } catch (error) {
+      ipv4 = `ERROR: ${String(error).split("\\n")[0]}`;
+    }
+    return {
+      type: "Instance",
+      name: instance["display-name"] ?? "",
+      state: instance["lifecycle-state"] ?? "",
+      shape: instance.shape ?? "",
+      cpu: String(instance["shape-config"]?.ocpus ?? "N/A"),
+      memory: String(instance["shape-config"]?.["memory-in-gbs"] ?? "N/A"),
+      ipv4,
+    } satisfies ReportRow;
   }));
+  const rows: ReportRow[] = instanceRows;
   rows.push(...mysqlResults.flatMap(result => result.data ?? []).map(db => ({
     type: "MySQL",
     name: db["display-name"] ?? "",
@@ -90,6 +114,7 @@ async function report(profile: Profile): Promise<string> {
     shape: db["shape-name"] ?? "",
     cpu: "N/A",
     memory: "N/A",
+    ipv4: "N/A",
   })));
   return table(profile, rows);
 }
