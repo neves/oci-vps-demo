@@ -1,137 +1,201 @@
 #!/usr/bin/env bun
+import { parseArgs } from "util";
+import { loadOciProfiles, ociJson, ociListAll, type OciProfile } from "./oci-fetch.ts";
 
-type Profile = { name: string; tenancy: string; region: string };
+type Compartment = { id: string; lifecycleState: string };
 type Instance = {
   id: string;
-  "display-name": string;
-  "lifecycle-state": string;
-  shape: string;
-  "shape-config"?: { ocpus?: number; "memory-in-gbs"?: number };
+  compartmentId: string;
+  displayName?: string;
+  lifecycleState?: string;
+  shape?: string;
+  shapeConfig?: { ocpus?: number; memoryInGBs?: number };
+};
+type VnicAttachment = {
+  instanceId: string;
+  vnicId: string;
+  lifecycleState: string;
+};
+type Vnic = {
+  privateIp?: string;
+  publicIp?: string | null;
 };
 type MysqlDbSystem = {
-  "display-name": string;
-  "lifecycle-state": string;
-  "shape-name": string;
+  displayName?: string;
+  lifecycleState?: string;
+  shapeName?: string;
 };
-type ReportRow = { type: string; name: string; state: string; shape: string; cpu: string; memory: string; ipv4: string };
+type ReportRow = {
+  profile: string;
+  region: string;
+  type: "Instance" | "MySQL";
+  name: string;
+  state: string;
+  shape: string;
+  cpu: number | string;
+  memoryGB: number | string;
+  privateIp: string;
+  publicIp: string;
+};
 
-const configPath = process.env.OCI_CLI_CONFIG_FILE ?? `${Bun.env.HOME}/.oci/config`;
+async function fetchCompartmentResources(
+  iaasBase: string,
+  mysqlBase: string,
+  compartmentId: string,
+  profile: OciProfile,
+) {
+  const instancesUrl = new URL(`${iaasBase}/instances`);
+  instancesUrl.searchParams.set("compartmentId", compartmentId);
 
-function profilesFrom(config: string): Profile[] {
-  const profiles: Profile[] = [];
-  let current: Partial<Profile> | undefined;
-  for (const line of config.split(/\r?\n/)) {
-    const section = line.match(/^\s*\[([^\]]+)\]\s*$/);
-    if (section) {
-      if (current?.name && current.tenancy && current.region) profiles.push(current as Profile);
-      current = { name: section[1] };
-      continue;
+  const attUrl = new URL(`${iaasBase}/vnicAttachments`);
+  attUrl.searchParams.set("compartmentId", compartmentId);
+
+  const mysqlUrl = new URL(`${mysqlBase}/dbSystems`);
+  mysqlUrl.searchParams.set("compartmentId", compartmentId);
+
+  const [instances, vnicsByInstance, mysqlDbs] = await Promise.all([
+    ociListAll<Instance>(instancesUrl, profile),
+    (async () => {
+      const attachments = await ociListAll<VnicAttachment>(attUrl, profile);
+      const active = attachments.filter((a) => a.lifecycleState === "ATTACHED");
+      const entries = await Promise.all(
+        active.map(async (a) => {
+          const vnic = await ociJson<Vnic>(`${iaasBase}/vnics/${a.vnicId}`, profile);
+          return [a.instanceId, vnic] as const;
+        }),
+      );
+      const map = new Map<string, Vnic[]>();
+      for (const [instanceId, vnic] of entries) {
+        const list = map.get(instanceId);
+        if (list) list.push(vnic);
+        else map.set(instanceId, [vnic]);
+      }
+      return map;
+    })(),
+    ociListAll<MysqlDbSystem>(mysqlUrl, profile).catch(() => [] as MysqlDbSystem[]),
+  ]);
+
+  return { instances, vnicsByInstance, mysqlDbs };
+}
+
+async function reportProfile(profile: OciProfile): Promise<ReportRow[]> {
+  const identityBase = `https://identity.${profile.region}.oci.oraclecloud.com/20160918`;
+  const iaasBase = `https://iaas.${profile.region}.oraclecloud.com/20160918`;
+  const mysqlBase = `https://mysql.${profile.region}.ocp.oraclecloud.com/20190415`;
+
+  const compartmentsUrl = new URL(`${identityBase}/compartments`);
+  compartmentsUrl.searchParams.set("compartmentId", profile.tenancy);
+  compartmentsUrl.searchParams.set("compartmentIdInSubtree", "true");
+  compartmentsUrl.searchParams.set("accessLevel", "ACCESSIBLE");
+
+  // Query root tenancy immediately in parallel with child-compartment discovery
+  const [rootData, childDataList] = await Promise.all([
+    fetchCompartmentResources(iaasBase, mysqlBase, profile.tenancy, profile),
+    ociListAll<Compartment>(compartmentsUrl, profile).then((compartments) => {
+      const childIds = [
+        ...new Set(
+          compartments
+            .filter((c) => c.lifecycleState === "ACTIVE" && c.id !== profile.tenancy)
+            .map((c) => c.id),
+        ),
+      ];
+      return Promise.all(
+        childIds.map((id) => fetchCompartmentResources(iaasBase, mysqlBase, id, profile)),
+      );
+    }),
+  ]);
+
+  const allData = [rootData, ...childDataList];
+  const instances = allData
+    .flatMap((d) => d.instances)
+    .filter((i) => i.lifecycleState !== "TERMINATED");
+  const mysqlDbs = allData
+    .flatMap((d) => d.mysqlDbs)
+    .filter((db) => db.lifecycleState !== "DELETED");
+
+  const vnicsByInstance = new Map<string, Vnic[]>();
+  for (const d of allData) {
+    for (const [instanceId, vnics] of d.vnicsByInstance) {
+      vnicsByInstance.set(instanceId, vnics);
     }
-    const setting = line.match(/^\s*(tenancy|region)\s*=\s*(.*?)\s*$/);
-    if (setting && current) current[setting[1] as "tenancy" | "region"] = setting[2];
   }
-  if (current?.name && current.tenancy && current.region) profiles.push(current as Profile);
-  return profiles;
-}
 
-async function ociJson<T>(args: string[]): Promise<T> {
-  const proc = Bun.spawn(["oci", "--config-file", configPath, ...args, "--output", "json"], {
-    stdout: "pipe", stderr: "pipe",
-  });
-  const stdoutPromise = new Response(proc.stdout).text();
-  const stderrPromise = new Response(proc.stderr).text();
-  const [stdout, stderr, code] = await Promise.all([stdoutPromise, stderrPromise, proc.exited]);
-  if (code !== 0) throw new Error(stderr.trim() || `oci exited with status ${code}`);
-  return (stdout.trim() ? JSON.parse(stdout) : {}) as T;
-}
+  const rows: ReportRow[] = instances.map((instance) => {
+    const vnics = vnicsByInstance.get(instance.id) ?? [];
+    const privateIp = vnics.map((v) => v.privateIp).filter(Boolean).join(", ") || "None";
+    const publicIp = vnics.map((v) => v.publicIp).filter(Boolean).join(", ") || "None";
 
-function table(profile: Profile, rows: ReportRow[]): string {
-  const headers = ["Type", "Name", "State", "Shape", "CPU", "Memory (GB)", "IPv4 addresses"];
-  const values = rows.map(r => [r.type, r.name, r.state, r.shape, r.cpu, r.memory, r.ipv4]);
-  const widths = headers.map((h, n) => Math.max(h.length, ...values.map(r => r[n].length)));
-  const format = (row: string[]) => row.map((value, n) => value.padEnd(widths[n])).join("  ");
-  return [
-    `=== Profile: ${profile.name} | region: ${profile.region} ===`,
-    format(headers), widths.map(w => "-".repeat(w)).join("  "), ...values.map(format),
-  ].join("\n");
-}
-
-async function report(profile: Profile): Promise<string> {
-  const compartments = await ociJson<{ data?: { id: string }[] }>([
-    "--profile", profile.name, "iam", "compartment", "list",
-    "--compartment-id", profile.tenancy, "--compartment-id-in-subtree", "true",
-    "--access-level", "ACCESSIBLE", "--all",
-  ]);
-  const ids = [...new Set([profile.tenancy, ...(compartments.data ?? []).map(c => c.id)])];
-
-  // Each list response includes shape-config; no per-instance get request is needed.
-  const [computeResults, mysqlResults] = await Promise.all([
-    Promise.all(ids.map(id => ociJson<{ data?: Instance[] }>([
-      "--profile", profile.name, "compute", "instance", "list",
-      "--compartment-id", id, "--all",
-    ]))),
-    Promise.all(ids.map(id => ociJson<{ data?: MysqlDbSystem[] }>([
-      "--profile", profile.name, "mysql", "db-system", "list",
-      "--compartment-id", id, "--all",
-    ]))),
-  ]);
-  const instances = computeResults.flatMap(result => result.data ?? []);
-  const instanceRows = await Promise.all(instances.map(async instance => {
-    let ipv4 = "N/A";
-    try {
-      const attachments = await ociJson<{ data?: { "vnic-id": string }[] }>([
-        "--profile", profile.name, "compute", "vnic-attachment", "list",
-        "--compartment-id", instance["compartment-id"] ?? profile.tenancy,
-        "--instance-id", instance.id,
-      ]);
-      const vnics = await Promise.all((attachments.data ?? []).map(({ "vnic-id": vnicId }) =>
-        ociJson<{ data?: { "private-ip"?: string; "public-ip"?: string | null } }>([
-          "--profile", profile.name, "network", "vnic", "get", "--vnic-id", vnicId,
-        ]),
-      ));
-      ipv4 = vnics.flatMap(vnic => {
-        const data = vnic.data;
-        return data ? [data["private-ip"], data["public-ip"]].filter((ip): ip is string => Boolean(ip)) : [];
-      }).join(", ") || "None";
-    } catch (error) {
-      ipv4 = `ERROR: ${String(error).split("\\n")[0]}`;
-    }
     return {
+      profile: profile.name,
+      region: profile.region,
       type: "Instance",
-      name: instance["display-name"] ?? "",
-      state: instance["lifecycle-state"] ?? "",
+      name: instance.displayName ?? "",
+      state: instance.lifecycleState ?? "",
       shape: instance.shape ?? "",
-      cpu: String(instance["shape-config"]?.ocpus ?? "N/A"),
-      memory: String(instance["shape-config"]?.["memory-in-gbs"] ?? "N/A"),
-      ipv4,
-    } satisfies ReportRow;
-  }));
-  const rows: ReportRow[] = instanceRows;
-  rows.push(...mysqlResults.flatMap(result => result.data ?? []).map(db => ({
-    type: "MySQL",
-    name: db["display-name"] ?? "",
-    state: db["lifecycle-state"] ?? "",
-    shape: db["shape-name"] ?? "",
-    cpu: "N/A",
-    memory: "N/A",
-    ipv4: "N/A",
-  })));
-  return table(profile, rows);
+      cpu: instance.shapeConfig?.ocpus ?? "N/A",
+      memoryGB: instance.shapeConfig?.memoryInGBs ?? "N/A",
+      privateIp,
+      publicIp,
+    };
+  });
+
+  rows.push(
+    ...mysqlDbs.map((db): ReportRow => ({
+      profile: profile.name,
+      region: profile.region,
+      type: "MySQL",
+      name: db.displayName ?? "",
+      state: db.lifecycleState ?? "",
+      shape: db.shapeName ?? "",
+      cpu: "N/A",
+      memoryGB: "N/A",
+      privateIp: "N/A",
+      publicIp: "N/A",
+    })),
+  );
+
+  return rows;
 }
+
+const { values, positionals } = parseArgs({
+  args: Bun.argv.slice(2),
+  options: {
+    profile: { type: "string", short: "p", multiple: true },
+  },
+  allowPositionals: true,
+});
 
 try {
-  const configured = profilesFrom(await Bun.file(configPath).text());
-  const requested = process.env.OCI_PROFILES?.split(",").map(s => s.trim()).filter(Boolean);
-  const profiles = requested?.length ? configured.filter(p => requested.includes(p.name)) : configured;
+  const configured = await loadOciProfiles();
+  const requested = [
+    ...(values.profile ?? []),
+    ...positionals,
+    ...(process.env.OCI_PROFILES?.split(",")
+      .map((s) => s.trim())
+      .filter(Boolean) ?? []),
+  ].filter(Boolean);
+  const profiles = requested.length
+    ? configured.filter((p) => requested.includes(p.name))
+    : configured;
   if (!profiles.length) throw new Error("No matching OCI profiles found in config");
 
-  // Finish one profile before starting the next; compartment queries within each profile run concurrently.
-  for (const profile of profiles) {
-    try {
-      console.log(`\n${await report(profile)}`);
-    } catch (error) {
-      console.error(`\n=== Profile: ${profile.name} | region: ${profile.region} ===\nERROR: ${String(error)}`);
-    }
+  const results = await Promise.all(
+    profiles.map(async (profile) => {
+      try {
+        return await reportProfile(profile);
+      } catch (error) {
+        console.error(`ERROR profile ${profile.name} (${profile.region}): ${String(error)}`);
+        process.exitCode = 1;
+        return [] as ReportRow[];
+      }
+    }),
+  );
+
+  const rows = results.flat();
+  if (rows.length) {
+    console.table(rows);
+  } else {
+    console.log("No instances found.");
   }
 } catch (error) {
   console.error(String(error));

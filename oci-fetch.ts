@@ -1,4 +1,4 @@
-import { createHash, createSign } from "node:crypto";
+import { createHash, createPrivateKey, createSign, type KeyObject } from "node:crypto";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 
@@ -10,7 +10,44 @@ export interface OciProfile {
   region: string;
   keyFile: string;
   privateKey: string;
+  privateKeyObject?: KeyObject;
   passphrase?: string;
+}
+
+const keyFileCache = new Map<
+  string,
+  Promise<{ privateKey: string; privateKeyObject: KeyObject }>
+>();
+const keyObjectCache = new Map<string, KeyObject>();
+
+function getOrCreateKeyObject(privateKey: string, passphrase?: string): KeyObject {
+  const cacheKey = passphrase ? `${privateKey}\0${passphrase}` : privateKey;
+  let keyObj = keyObjectCache.get(cacheKey);
+  if (!keyObj) {
+    keyObj = createPrivateKey(
+      passphrase ? { key: privateKey, passphrase } : privateKey,
+    );
+    keyObjectCache.set(cacheKey, keyObj);
+  }
+  return keyObj;
+}
+
+function loadKeyFile(
+  keyFile: string,
+  passphrase?: string,
+): Promise<{ privateKey: string; privateKeyObject: KeyObject }> {
+  const cacheKey = passphrase ? `${keyFile}\0${passphrase}` : keyFile;
+  let pending = keyFileCache.get(cacheKey);
+  if (!pending) {
+    pending = Bun.file(keyFile)
+      .text()
+      .then((privateKey) => ({
+        privateKey,
+        privateKeyObject: getOrCreateKeyObject(privateKey, passphrase),
+      }));
+    keyFileCache.set(cacheKey, pending);
+  }
+  return pending;
 }
 
 export const DEFAULT_OCI_CONFIG_PATH =
@@ -25,125 +62,151 @@ function expandHome(filepath: string): string {
 
 /**
  * Parses an OCI config file (default `~/.oci/config`) and loads each profile's private key.
+ * Uses `Bun.TOML.parse` after quoting unquoted INI values (`key=value` -> `key='value'`).
  */
 export async function loadOciProfiles(
   configPath: string = DEFAULT_OCI_CONFIG_PATH,
 ): Promise<OciProfile[]> {
-  const text = await Bun.file(expandHome(configPath)).text();
-  const rawProfiles: Array<Record<string, string> & { name: string }> = [];
-  let current: (Record<string, string> & { name: string }) | undefined;
+  const iniText = await Bun.file(expandHome(configPath)).text();
+  const tomlText = iniText.replace(
+    /^(\s*[\w.-]+\s*=\s*)(?!["'])(.+?)\s*$/gm,
+    "$1'$2'",
+  );
+  const parsed = Bun.TOML.parse(tomlText) as Record<string, Record<string, string>>;
 
-  for (const line of text.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith(";")) continue;
+  const entries = Object.entries(parsed).filter(
+    ([, r]) => r && r.tenancy && r.user && r.fingerprint && r.region && r.key_file,
+  );
 
-    const section = trimmed.match(/^\[([^\]]+)\]$/);
-    if (section?.[1]) {
-      if (current) rawProfiles.push(current);
-      current = { name: section[1].trim() };
-      continue;
-    }
+  return Promise.all(
+    entries.map(async ([name, raw]): Promise<OciProfile> => {
+      const { tenancy, user, fingerprint, region, key_file, pass_phrase } = raw;
+      const keyFile = expandHome(key_file!);
+      const { privateKey, privateKeyObject } = await loadKeyFile(keyFile, pass_phrase);
+      return {
+        name,
+        tenancy: tenancy!,
+        user: user!,
+        fingerprint: fingerprint!,
+        region: region!,
+        keyFile,
+        privateKey,
+        privateKeyObject,
+        ...(pass_phrase ? { passphrase: pass_phrase } : {}),
+      };
+    }),
+  );
+}
 
-    const eqIndex = trimmed.indexOf("=");
-    if (eqIndex > 0 && current) {
-      const key = trimmed.slice(0, eqIndex).trim();
-      const value = trimmed.slice(eqIndex + 1).trim();
-      current[key] = value;
-    }
-  }
-  if (current) rawProfiles.push(current);
+export type OciCredentials = Pick<
+  OciProfile,
+  "tenancy" | "user" | "fingerprint" | "privateKey" | "privateKeyObject" | "passphrase"
+>;
 
-  const profiles: OciProfile[] = [];
-  for (const raw of rawProfiles) {
-    const { name, tenancy, user, fingerprint, region, key_file, pass_phrase } = raw;
-    if (!tenancy || !user || !fingerprint || !region || !key_file) continue;
+const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 
-    const keyFile = expandHome(key_file);
-    const privateKey = await Bun.file(keyFile).text();
-    profiles.push({
-      name,
-      tenancy,
-      user,
-      fingerprint,
-      region,
-      keyFile,
-      privateKey,
-      ...(pass_phrase ? { passphrase: pass_phrase } : {}),
-    });
-  }
-
-  return profiles;
+export interface OciFetchInit extends RequestInit {
+  /** Maximum number of retries on transient 429/5xx or network errors (default: 4). */
+  maxRetries?: number;
 }
 
 /**
- * Signs and executes an HTTP request against the Oracle Cloud Infrastructure REST API.
+ * Signs and executes an HTTP request against the Oracle Cloud Infrastructure REST API,
+ * with automatic exponential-backoff retry on transient 429/5xx responses.
  */
 export async function ociFetch(
   input: string | URL,
-  profile: Pick<OciProfile, "tenancy" | "user" | "fingerprint" | "privateKey" | "passphrase">,
-  init: RequestInit = {},
+  profile: OciCredentials,
+  init: OciFetchInit = {},
 ): Promise<Response> {
+  const { maxRetries = 4, ...fetchInit } = init;
   const url = typeof input === "string" ? new URL(input) : input;
-  const method = (init.method ?? "GET").toUpperCase();
+  const method = (fetchInit.method ?? "GET").toUpperCase();
   const body =
-    typeof init.body === "string"
-      ? init.body
-      : init.body instanceof Uint8Array
-        ? Buffer.from(init.body).toString("utf8")
+    typeof fetchInit.body === "string"
+      ? fetchInit.body
+      : fetchInit.body instanceof Uint8Array
+        ? Buffer.from(fetchInit.body).toString("utf8")
         : "";
   const hasBody = ["POST", "PUT", "PATCH"].includes(method);
+  const bodyLength = hasBody ? Buffer.byteLength(body).toString() : undefined;
+  const bodySha256 = hasBody ? createHash("sha256").update(body).digest("base64") : undefined;
 
-  const headers: Record<string, string> = {
-    date: new Date().toUTCString(),
+  const baseHeaders: Record<string, string> = {
     host: url.host,
     accept: "application/json",
   };
 
-  if (init.headers) {
-    const incoming = new Headers(init.headers);
+  if (fetchInit.headers) {
+    const incoming = new Headers(fetchInit.headers);
     incoming.forEach((value, key) => {
-      headers[key.toLowerCase()] = value;
+      baseHeaders[key.toLowerCase()] = value;
     });
   }
 
   const signedHeaderNames = ["(request-target)", "date", "host"];
-
   if (hasBody) {
-    headers["content-type"] ??= "application/json";
-    headers["content-length"] = Buffer.byteLength(body).toString();
-    headers["x-content-sha256"] = createHash("sha256").update(body).digest("base64");
+    baseHeaders["content-type"] ??= "application/json";
+    baseHeaders["content-length"] = bodyLength!;
+    baseHeaders["x-content-sha256"] = bodySha256!;
     signedHeaderNames.push("x-content-sha256", "content-type", "content-length");
   }
 
   const targetPath = `${url.pathname}${url.search}`;
-  const signingString = signedHeaderNames
-    .map((name) =>
-      name === "(request-target)"
-        ? `(request-target): ${method.toLowerCase()} ${targetPath}`
-        : `${name}: ${headers[name]}`,
-    )
-    .join("\n");
-
-  const signer = createSign("RSA-SHA256");
-  signer.update(signingString);
-  const signature = signer.sign(
-    profile.passphrase
-      ? { key: profile.privateKey, passphrase: profile.passphrase }
-      : profile.privateKey,
-    "base64",
-  );
-
+  const key =
+    profile.privateKeyObject ?? getOrCreateKeyObject(profile.privateKey, profile.passphrase);
   const keyId = `${profile.tenancy}/${profile.user}/${profile.fingerprint}`;
-  headers["authorization"] =
-    `Signature version="1",keyId="${keyId}",algorithm="rsa-sha256",` +
-    `headers="${signedHeaderNames.join(" ")}",signature="${signature}"`;
+  const signedHeadersAttr = signedHeaderNames.join(" ");
 
-  return fetch(url, {
-    ...init,
-    method,
-    headers,
-    ...(hasBody ? { body } : {}),
-  });
+  for (let attempt = 0; ; attempt++) {
+    const headers: Record<string, string> = {
+      ...baseHeaders,
+      date: new Date().toUTCString(),
+    };
+
+    const signingString = signedHeaderNames
+      .map((name) =>
+        name === "(request-target)"
+          ? `(request-target): ${method.toLowerCase()} ${targetPath}`
+          : `${name}: ${headers[name]}`,
+      )
+      .join("\n");
+
+    const signer = createSign("RSA-SHA256");
+    signer.update(signingString);
+    const signature = signer.sign(key, "base64");
+
+    headers["authorization"] =
+      `Signature version="1",keyId="${keyId}",algorithm="rsa-sha256",` +
+      `headers="${signedHeadersAttr}",signature="${signature}"`;
+
+    try {
+      const res = await fetch(url, {
+        ...fetchInit,
+        method,
+        headers,
+        ...(hasBody ? { body } : {}),
+      });
+
+      if (!RETRYABLE_STATUSES.has(res.status) || attempt >= maxRetries) {
+        return res;
+      }
+
+      // Drain body before retrying so the underlying connection can be reused
+      await res.arrayBuffer().catch(() => {});
+
+      const retryAfterSec = Number(res.headers.get("retry-after"));
+      const delayMs =
+        Number.isFinite(retryAfterSec) && retryAfterSec > 0
+          ? retryAfterSec * 1000
+          : Math.min(8000, 400 * 2 ** attempt) + Math.random() * 300;
+      await Bun.sleep(delayMs);
+    } catch (err) {
+      if (attempt >= maxRetries) throw err;
+      const delayMs = Math.min(8000, 400 * 2 ** attempt) + Math.random() * 300;
+      await Bun.sleep(delayMs);
+    }
+  }
 }
 
 /**
@@ -151,8 +214,8 @@ export async function ociFetch(
  */
 export async function ociJson<T>(
   input: string | URL,
-  profile: Pick<OciProfile, "tenancy" | "user" | "fingerprint" | "privateKey" | "passphrase">,
-  init: RequestInit = {},
+  profile: OciCredentials,
+  init: OciFetchInit = {},
 ): Promise<T> {
   const res = await ociFetch(input, profile, init);
   if (!res.ok) {
@@ -167,8 +230,8 @@ export async function ociJson<T>(
  */
 export async function ociListAll<T>(
   input: string | URL,
-  profile: Pick<OciProfile, "tenancy" | "user" | "fingerprint" | "privateKey" | "passphrase">,
-  init: RequestInit = {},
+  profile: OciCredentials,
+  init: OciFetchInit = {},
 ): Promise<T[]> {
   const baseUrl = typeof input === "string" ? new URL(input) : new URL(input.toString());
   const results: T[] = [];
@@ -184,7 +247,8 @@ export async function ociListAll<T>(
       throw new Error(`OCI API ${res.status} ${res.statusText} (${pageUrl}): ${errText}`);
     }
 
-    const items = (await res.json()) as T[];
+    const data = (await res.json()) as T[] | { items?: T[] };
+    const items = Array.isArray(data) ? data : (data.items ?? []);
     results.push(...items);
     nextPage = res.headers.get("opc-next-page");
   } while (nextPage);
